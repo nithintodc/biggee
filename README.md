@@ -14,6 +14,35 @@ This analysis evaluates the impact of TODC (online restaurant management company
 
 The analysis uses the following CSV files:
 
+### Column Names Reference
+
+**Financial Data Columns:**
+- `Timestamp UTC date`: Date for financial transactions
+- `Subtotal`: Order subtotal amount
+- `Commission`: Commission charged (negative value)
+- `Marketing fees | (including any applicable taxes)`: Marketing fees
+- `Customer discounts from marketing | (funded by you)`: Customer discounts funded by merchant
+- `Customer discounts from marketing | (funded by DoorDash)`: Customer discounts funded by DoorDash
+- `Net total`: Net payout amount
+- `Transaction type`: Type of transaction (Order, etc.)
+
+**Marketing Data Columns:**
+- `Date`: Campaign date
+- `Is self serve campaign`: Boolean indicating if campaign is self-serve (TRUE/FALSE)
+- `Campaign name`: Name of the marketing campaign
+- `Orders`: Number of orders from campaign
+- `Sales`: Sales generated from campaign
+- `Customer discounts from marketing | (Funded by you)`: Customer discounts funded by merchant
+- `Marketing fees | (including any applicable taxes)`: Marketing fees
+- `ROAS`: Return on Ad Spend
+
+**Sales Data Columns:**
+- `Start Date`: Date for sales data
+- `Gross Sales`: Total gross sales
+- `Total Delivered or Picked Up Orders`: Number of completed orders
+- `AOV`: Average Order Value
+- `Total Commission`: Total commission charged
+
 ### Financial Data
 - `FINANCIAL_DETAILED_TRANSACTIONS_2024-05-09_2024-09-08_Ir1lF_2025-09-27T17-00-28Z.csv`
 - `FINANCIAL_DETAILED_TRANSACTIONS_2025-05-09_2025-09-08_aPoMn_2025-09-27T16-55-21Z.csv`
@@ -59,6 +88,12 @@ The analysis uses the following CSV files:
 - **Growth Trends**: Detailed comparison across all periods
 - **TODC Impact Assessment**: Pre vs Post TODC YoY performance comparison
 
+### 5. Monthly Analysis
+- **Month-wise Breakdown**: Analysis by month periods (May, June, July, August)
+- **Key Metrics**: Sales, Net Payout, Marketing Spend, Customer Discounts
+- **Trend Analysis**: Month-over-month performance patterns
+- **Visualization**: Bar charts and normalized trend lines for easy comparison
+
 ## Key Performance Indicators (KPIs)
 
 ### Primary KPIs
@@ -84,9 +119,11 @@ For every metric, the analysis provides:
 
 ### Visualizations
 1. **Line Graphs**: Daily trends showing pre/post TODC performance
-2. **Scatter Plot**: Campaign budget vs sales with ROI contour lines
+2. **Scatter Plot**: Campaign budget vs sales with ROI contour lines (filtered to self-serve campaigns only)
 3. **Bar Charts**: Store performance comparisons
 4. **Financial Metrics**: Side-by-side pre/post comparisons
+5. **Monthly Metrics**: Month-wise analysis of sales, net payout, marketing spend, and customer discounts
+6. **Monthly Trends**: Normalized trend lines showing all metrics over time
 
 ## ROI Calculations
 
@@ -125,9 +162,11 @@ The script generates:
    - Insights_Recommendations
 3. **Visualizations**: PNG charts saved in 'charts' directory:
    - line_graphs_trends.png (Daily trends for sales, orders, AOV, marketing spend)
-   - campaign_budget_vs_sales.png (Scatter plot with ROI contours)
+   - campaign_budget_vs_sales.png (Scatter plot with ROI contours - self-serve campaigns only)
    - store_performance_comparison.png (Store-level comparisons)
    - financial_metrics_comparison.png (Key financial metrics)
+   - monthly_metrics_comparison.png (Month-wise bar charts for all key metrics)
+   - monthly_metrics_trends.png (Normalized trend lines showing monthly patterns)
 
 ## Analysis Methodology
 

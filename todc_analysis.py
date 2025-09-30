@@ -13,6 +13,36 @@ Analysis Periods:
 
 Author: TODC Analytics Team
 Date: 2025-09-27
+
+COLUMN NAMES REFERENCE:
+======================
+
+Financial Data Columns:
+- 'Timestamp UTC date': Date for financial transactions
+- 'Subtotal': Order subtotal amount
+- 'Commission': Commission charged (negative value)
+- 'Marketing fees | (including any applicable taxes)': Marketing fees
+- 'Customer discounts from marketing | (funded by you)': Customer discounts funded by merchant
+- 'Customer discounts from marketing | (funded by DoorDash)': Customer discounts funded by DoorDash
+- 'Net total': Net payout amount
+- 'Transaction type': Type of transaction (Order, etc.)
+
+Marketing Data Columns:
+- 'Date': Campaign date
+- 'Is self serve campaign': Boolean indicating if campaign is self-serve (TRUE/FALSE)
+- 'Campaign name': Name of the marketing campaign
+- 'Orders': Number of orders from campaign
+- 'Sales': Sales generated from campaign
+- 'Customer discounts from marketing | (Funded by you)': Customer discounts funded by merchant
+- 'Marketing fees | (including any applicable taxes)': Marketing fees
+- 'ROAS': Return on Ad Spend
+
+Sales Data Columns:
+- 'Start Date': Date for sales data
+- 'Gross Sales': Total gross sales
+- 'Total Delivered or Picked Up Orders': Number of completed orders
+- 'AOV': Average Order Value
+- 'Total Commission': Total commission charged
 """
 
 import pandas as pd
@@ -232,6 +262,15 @@ class TODCAnalyzer:
         if len(df) == 0:
             return {}
         
+        # Filter only self-serve campaigns (SELFSERVE = TRUE)
+        if 'Is self serve campaign' in df.columns:
+            df = df[df['Is self serve campaign'] == True]
+            print(f"  Filtered to {len(df)} self-serve campaign records for {period_name}")
+        
+        if len(df) == 0:
+            print(f"  No self-serve campaigns found for {period_name}")
+            return {}
+        
         # Handle different column name formats
         customer_discounts_col = None
         marketing_fees_col = None
@@ -405,6 +444,489 @@ class TODCAnalyzer:
         
         return merged
     
+    def analyze_weekly_metrics(self):
+        """Analyze week-wise metrics for sales, net payout, marketing spend, and customer discounts."""
+        print("\n" + "="*60)
+        print("WEEK-WISE ANALYSIS")
+        print("="*60)
+        
+        # Define week periods starting from 5/9
+        week_periods = {}
+        start_date = pd.to_datetime('2025-05-09')
+        current_date = start_date
+        week_num = 1
+        
+        while current_date <= pd.to_datetime('2025-09-08'):
+            week_end = current_date + pd.Timedelta(days=6)
+            if week_end > pd.to_datetime('2025-09-08'):
+                week_end = pd.to_datetime('2025-09-08')
+            
+            week_name = f"Week {week_num}"
+            week_periods[week_name] = (current_date.strftime('%Y-%m-%d'), week_end.strftime('%Y-%m-%d'))
+            
+            current_date = week_end + pd.Timedelta(days=1)
+            week_num += 1
+        
+        weekly_data = []
+        
+        for week_name, (start_date, end_date) in week_periods.items():
+            print(f"\nAnalyzing {week_name} ({start_date} to {end_date})...")
+            
+            # Filter financial data for the week
+            week_financial = self.filter_by_period(self.financial_2025, start_date, end_date)
+            week_marketing = self.filter_by_period(self.marketing_2025, start_date, end_date)
+            week_sales = self.filter_by_period(self.sales_2025, start_date, end_date)
+            
+            # Calculate metrics for the week
+            week_metrics = self.calculate_weekly_metrics(week_financial, week_marketing, week_sales, week_name, start_date, end_date)
+            weekly_data.append(week_metrics)
+            
+            # Print week summary
+            print(f"  Sales: ${week_metrics['sales']:,.2f}")
+            print(f"  Net Payout: ${week_metrics['net_payout']:,.2f}")
+            print(f"  Marketing Spend: ${week_metrics['marketing_spend']:,.2f}")
+            print(f"  Customer Discounts: ${week_metrics['customer_discounts']:,.2f}")
+        
+        return weekly_data
+    
+    def calculate_weekly_metrics(self, financial_df, marketing_df, sales_df, week_name, start_date, end_date):
+        """Calculate comprehensive metrics for a specific week including all financial components."""
+        # Sales (from sales data)
+        sales = sales_df['Gross Sales'].sum() if len(sales_df) > 0 else 0
+        
+        # Net Payout (from financial data - only orders)
+        orders_df = financial_df[financial_df['Transaction type'] == 'Order'] if len(financial_df) > 0 else pd.DataFrame()
+        net_payout = orders_df['Net total'].sum() if len(orders_df) > 0 else 0
+        
+        # Marketing Spend (marketing fees + customer discounts funded by you)
+        marketing_spend = 0
+        if len(marketing_df) > 0:
+            marketing_fees = marketing_df['Marketing fees | (including any applicable taxes)'].sum()
+            customer_discounts = marketing_df['Customer discounts from marketing | (Funded by you)'].sum()
+            marketing_spend = marketing_fees + customer_discounts
+        
+        # Customer Discounts (funded by you)
+        customer_discounts = 0
+        if len(marketing_df) > 0:
+            customer_discounts = marketing_df['Customer discounts from marketing | (Funded by you)'].sum()
+        
+        # Comprehensive financial metrics from orders
+        comprehensive_metrics = {}
+        if len(orders_df) > 0:
+            comprehensive_metrics = {
+                'subtotal': orders_df['Subtotal'].sum(),
+                'commission': orders_df['Commission'].abs().sum(),  # Commission is negative
+                'marketing_fees': orders_df['Marketing fees | (including any applicable taxes)'].sum() if 'Marketing fees | (including any applicable taxes)' in orders_df.columns else 0,
+                'customer_discounts_funded_by_you': orders_df['Customer discounts from marketing | (funded by you)'].sum() if 'Customer discounts from marketing | (funded by you)' in orders_df.columns else 0,
+                'customer_discounts_funded_by_dd': orders_df['Customer discounts from marketing | (funded by DoorDash)'].sum() if 'Customer discounts from marketing | (funded by DoorDash)' in orders_df.columns else 0,
+                'net_total': orders_df['Net total'].sum(),
+                'total_orders': len(orders_df),
+                'avg_order_value': orders_df['Subtotal'].mean()
+            }
+        
+        return {
+            'week': week_name,
+            'start_date': start_date,
+            'end_date': end_date,
+            'sales': sales,
+            'net_payout': net_payout,
+            'marketing_spend': marketing_spend,
+            'customer_discounts': customer_discounts,
+            **comprehensive_metrics
+        }
+    
+    def analyze_comprehensive_pre_post_metrics(self):
+        """Analyze comprehensive pre vs post metrics for all financial components between subtotal and net total."""
+        print("\n" + "="*60)
+        print("COMPREHENSIVE PRE vs POST ANALYSIS")
+        print("="*60)
+        
+        # Filter data for pre and post TODC periods
+        pre_todc_financial = self.filter_by_period(self.financial_2025, self.pre_todc_start, self.pre_todc_end)
+        post_todc_financial = self.filter_by_period(self.financial_2025, self.post_todc_start, self.post_todc_end)
+        
+        # Filter only orders for detailed analysis
+        pre_orders = pre_todc_financial[pre_todc_financial['Transaction type'] == 'Order']
+        post_orders = post_todc_financial[post_todc_financial['Transaction type'] == 'Order']
+        
+        # Calculate comprehensive metrics for pre-TODC
+        pre_metrics = self.calculate_comprehensive_financial_metrics(pre_orders, "Pre-TODC")
+        
+        # Calculate comprehensive metrics for post-TODC
+        post_metrics = self.calculate_comprehensive_financial_metrics(post_orders, "Post-TODC")
+        
+        # Calculate growth metrics
+        growth_metrics = self.calculate_comprehensive_growth_metrics(pre_metrics, post_metrics)
+        
+        return {
+            'pre_todc': pre_metrics,
+            'post_todc': post_metrics,
+            'growth': growth_metrics
+        }
+    
+    def calculate_comprehensive_financial_metrics(self, orders_df, period_name):
+        """Calculate comprehensive financial metrics for all components between subtotal and net total."""
+        if len(orders_df) == 0:
+            return {}
+        
+        # Handle different column name formats
+        marketing_fees_col = None
+        customer_discounts_col = None
+        dd_discounts_col = None
+        
+        # Check for 2025 format first
+        if 'Marketing fees | (including any applicable taxes)' in orders_df.columns:
+            marketing_fees_col = 'Marketing fees | (including any applicable taxes)'
+        elif 'Marketing fees (for historical reference only) | (all discounts and fees)' in orders_df.columns:
+            marketing_fees_col = 'Marketing fees (for historical reference only) | (all discounts and fees)'
+        
+        if 'Customer discounts from marketing | (funded by you)' in orders_df.columns:
+            customer_discounts_col = 'Customer discounts from marketing | (funded by you)'
+        elif 'Customer discounts from marketing | (Funded by you)' in orders_df.columns:
+            customer_discounts_col = 'Customer discounts from marketing | (Funded by you)'
+        
+        if 'Customer discounts from marketing | (funded by DoorDash)' in orders_df.columns:
+            dd_discounts_col = 'Customer discounts from marketing | (funded by DoorDash)'
+        elif 'Customer discounts from marketing | (Funded by DoorDash)' in orders_df.columns:
+            dd_discounts_col = 'Customer discounts from marketing | (Funded by DoorDash)'
+        
+        metrics = {
+            'period': period_name,
+            'total_orders': len(orders_df),
+            'subtotal': orders_df['Subtotal'].sum(),
+            'commission': orders_df['Commission'].abs().sum(),  # Commission is negative
+            'marketing_fees': orders_df[marketing_fees_col].sum() if marketing_fees_col else 0,
+            'customer_discounts_funded_by_you': orders_df[customer_discounts_col].sum() if customer_discounts_col else 0,
+            'customer_discounts_funded_by_dd': orders_df[dd_discounts_col].sum() if dd_discounts_col else 0,
+            'net_total': orders_df['Net total'].sum(),
+            'avg_order_value': orders_df['Subtotal'].mean(),
+            'avg_commission_rate': (orders_df['Commission'].abs().sum() / orders_df['Subtotal'].sum()) * 100,
+            'avg_marketing_fee_rate': (orders_df[marketing_fees_col].sum() / orders_df['Subtotal'].sum()) * 100 if marketing_fees_col else 0,
+            'avg_customer_discount_rate': (orders_df[customer_discounts_col].sum() / orders_df['Subtotal'].sum()) * 100 if customer_discounts_col else 0,
+            'unique_stores': orders_df['Store ID'].nunique()
+        }
+        
+        print(f"\n{period_name} Comprehensive Financial Metrics:")
+        print(f"  Total Orders: {metrics['total_orders']:,}")
+        print(f"  Subtotal: ${metrics['subtotal']:,.2f}")
+        print(f"  Commission: ${metrics['commission']:,.2f} ({metrics['avg_commission_rate']:.2f}%)")
+        print(f"  Marketing Fees: ${metrics['marketing_fees']:,.2f} ({metrics['avg_marketing_fee_rate']:.2f}%)")
+        print(f"  Customer Discounts (Funded by You): ${metrics['customer_discounts_funded_by_you']:,.2f} ({metrics['avg_customer_discount_rate']:.2f}%)")
+        print(f"  Customer Discounts (Funded by DD): ${metrics['customer_discounts_funded_by_dd']:,.2f}")
+        print(f"  Net Total: ${metrics['net_total']:,.2f}")
+        print(f"  Average Order Value: ${metrics['avg_order_value']:.2f}")
+        print(f"  Unique Stores: {metrics['unique_stores']}")
+        
+        return metrics
+    
+    def calculate_comprehensive_growth_metrics(self, pre_metrics, post_metrics):
+        """Calculate comprehensive growth metrics between pre and post TODC periods."""
+        growth = {}
+        
+        for key in pre_metrics:
+            if key == 'period':
+                continue
+            if isinstance(pre_metrics[key], (int, float)) and pre_metrics[key] != 0:
+                delta = post_metrics[key] - pre_metrics[key]
+                delta_percent = (delta / pre_metrics[key]) * 100
+                growth[f'{key}_delta'] = delta
+                growth[f'{key}_delta_percent'] = delta_percent
+        
+        print(f"\nComprehensive Growth Analysis (Post-TODC vs Pre-TODC):")
+        for key, value in growth.items():
+            if 'delta_percent' in key:
+                metric_name = key.replace('_delta_percent', '').replace('_', ' ').title()
+                delta_value = growth[key.replace('_delta_percent', '_delta')]
+                print(f"  {metric_name}:")
+                print(f"    Delta: {delta_value:+,.2f}")
+                print(f"    Delta %: {value:+.2f}%")
+        
+        return growth
+    
+    def analyze_self_serve_campaigns_budget_vs_sales(self):
+        """Analyze budget vs sales for self-serve campaigns (Is self serve campaign = TRUE)."""
+        print("\n" + "="*60)
+        print("SELF-SERVE CAMPAIGNS BUDGET VS SALES ANALYSIS")
+        print("="*60)
+        
+        # Filter marketing data for self-serve campaigns only
+        self_serve_2024 = self.marketing_2024[self.marketing_2024['Is self serve campaign'] == True].copy()
+        self_serve_2025 = self.marketing_2025[self.marketing_2025['Is self serve campaign'] == True].copy()
+        
+        print(f"Self-serve campaigns 2024: {len(self_serve_2024)} records")
+        print(f"Self-serve campaigns 2025: {len(self_serve_2025)} records")
+        
+        # Handle different column name formats
+        def get_campaign_cost(df):
+            customer_discounts = 0
+            marketing_fees = 0
+            
+            if 'Customer discounts from marketing | (Funded by you)' in df.columns:
+                customer_discounts = df['Customer discounts from marketing | (Funded by you)'].sum()
+            elif 'Customer discounts from marketing | (funded by you)' in df.columns:
+                customer_discounts = df['Customer discounts from marketing | (funded by you)'].sum()
+            
+            if 'Marketing fees | (including any applicable taxes)' in df.columns:
+                marketing_fees = df['Marketing fees | (including any applicable taxes)'].sum()
+            elif 'Marketing fees (for historical reference only) | (all discounts and fees)' in df.columns:
+                marketing_fees = df['Marketing fees (for historical reference only) | (all discounts and fees)'].sum()
+            
+            return customer_discounts + marketing_fees
+        
+        # Calculate metrics for 2024 self-serve campaigns
+        self_serve_2024_metrics = {
+            'year': 2024,
+            'total_campaigns': len(self_serve_2024),
+            'total_orders': self_serve_2024['Orders'].sum() if len(self_serve_2024) > 0 else 0,
+            'total_sales': self_serve_2024['Sales'].sum() if len(self_serve_2024) > 0 else 0,
+            'total_budget': get_campaign_cost(self_serve_2024),
+            'avg_roas': self_serve_2024['ROAS'].mean() if len(self_serve_2024) > 0 else 0,
+            'unique_campaigns': self_serve_2024['Campaign name'].nunique() if len(self_serve_2024) > 0 else 0
+        }
+        
+        # Calculate metrics for 2025 self-serve campaigns
+        self_serve_2025_metrics = {
+            'year': 2025,
+            'total_campaigns': len(self_serve_2025),
+            'total_orders': self_serve_2025['Orders'].sum() if len(self_serve_2025) > 0 else 0,
+            'total_sales': self_serve_2025['Sales'].sum() if len(self_serve_2025) > 0 else 0,
+            'total_budget': get_campaign_cost(self_serve_2025),
+            'avg_roas': self_serve_2025['ROAS'].mean() if len(self_serve_2025) > 0 else 0,
+            'unique_campaigns': self_serve_2025['Campaign name'].nunique() if len(self_serve_2025) > 0 else 0
+        }
+        
+        # Calculate year-over-year growth
+        yoy_growth = {}
+        for key in self_serve_2024_metrics:
+            if key == 'year':
+                continue
+            if isinstance(self_serve_2024_metrics[key], (int, float)) and self_serve_2024_metrics[key] != 0:
+                delta = self_serve_2025_metrics[key] - self_serve_2024_metrics[key]
+                delta_percent = (delta / self_serve_2024_metrics[key]) * 100
+                yoy_growth[f'{key}_delta'] = delta
+                yoy_growth[f'{key}_delta_percent'] = delta_percent
+        
+        print(f"\nSelf-Serve Campaigns Summary:")
+        print(f"2024: {self_serve_2024_metrics['total_campaigns']} campaigns, ${self_serve_2024_metrics['total_budget']:,.2f} budget, ${self_serve_2024_metrics['total_sales']:,.2f} sales")
+        print(f"2025: {self_serve_2025_metrics['total_campaigns']} campaigns, ${self_serve_2025_metrics['total_budget']:,.2f} budget, ${self_serve_2025_metrics['total_sales']:,.2f} sales")
+        
+        # Create detailed campaign analysis for 2025 (more recent data) with proper pivot
+        if len(self_serve_2025) > 0:
+            # Create pivot table with all requested columns
+            pivot_columns = {
+                'Orders': 'sum',
+                'Sales': 'sum',
+                'New customers acquired': 'sum',
+                'Total customers acquired': 'sum'
+            }
+            
+            # Add customer discounts column if it exists
+            if 'Customer discounts from marketing | (Funded by you)' in self_serve_2025.columns:
+                pivot_columns['Customer discounts from marketing | (Funded by you)'] = 'sum'
+            elif 'Customer discounts from marketing | (funded by you)' in self_serve_2025.columns:
+                pivot_columns['Customer discounts from marketing | (funded by you)'] = 'sum'
+            
+            # Add marketing fees column if it exists
+            if 'Marketing fees | (including any applicable taxes)' in self_serve_2025.columns:
+                pivot_columns['Marketing fees | (including any applicable taxes)'] = 'sum'
+            elif 'Marketing fees (for historical reference only) | (all discounts and fees)' in self_serve_2025.columns:
+                pivot_columns['Marketing fees (for historical reference only) | (all discounts and fees)'] = 'sum'
+            
+            # Add new DP customers acquired if it exists
+            if 'New DP customers acquired' in self_serve_2025.columns:
+                pivot_columns['New DP customers acquired'] = 'sum'
+            
+            # Create the pivot table
+            campaign_analysis = self_serve_2025.groupby('Campaign name').agg(pivot_columns).round(2)
+            
+            # Calculate total budget and ROI
+            campaign_budgets = self_serve_2025.groupby('Campaign name').apply(get_campaign_cost)
+            campaign_analysis['Total_Budget'] = campaign_budgets
+            
+            # Calculate ROI
+            campaign_analysis['ROI'] = (
+                (campaign_analysis['Sales'] - campaign_analysis['Total_Budget']) / 
+                campaign_analysis['Total_Budget'] * 100
+            ).round(2)
+            
+            # Sort by ROI descending
+            campaign_analysis = campaign_analysis.sort_values('ROI', ascending=False)
+            
+            print(f"\nTop 10 Self-Serve Campaigns by ROI (2025):")
+            print(campaign_analysis.head(10))
+            
+            return {
+                'summary_2024': self_serve_2024_metrics,
+                'summary_2025': self_serve_2025_metrics,
+                'yoy_growth': yoy_growth,
+                'detailed_campaigns_2025': campaign_analysis
+            }
+        else:
+            return {
+                'summary_2024': self_serve_2024_metrics,
+                'summary_2025': self_serve_2025_metrics,
+                'yoy_growth': yoy_growth,
+                'detailed_campaigns_2025': pd.DataFrame()
+            }
+    
+    def analyze_store_level_metrics(self):
+        """Analyze store-level metrics for pre vs post TODC periods with delta calculations."""
+        print("\n" + "="*60)
+        print("STORE-LEVEL METRICS ANALYSIS")
+        print("="*60)
+        
+        # Filter data for pre and post TODC periods
+        pre_todc_financial = self.filter_by_period(self.financial_2025, self.pre_todc_start, self.pre_todc_end)
+        post_todc_financial = self.filter_by_period(self.financial_2025, self.post_todc_start, self.post_todc_end)
+        
+        pre_todc_marketing = self.filter_by_period(self.marketing_2025, self.pre_todc_start, self.pre_todc_end)
+        post_todc_marketing = self.filter_by_period(self.marketing_2025, self.post_todc_start, self.post_todc_end)
+        
+        # Calculate store-level metrics for pre-TODC
+        pre_store_metrics = self.calculate_store_level_metrics(pre_todc_financial, pre_todc_marketing, "Pre-TODC")
+        
+        # Calculate store-level metrics for post-TODC
+        post_store_metrics = self.calculate_store_level_metrics(post_todc_financial, post_todc_marketing, "Post-TODC")
+        
+        # Create comprehensive comparison table with delta calculations
+        store_comparison = self.create_store_comparison_table(pre_store_metrics, post_store_metrics)
+        
+        return {
+            'pre_metrics': pre_store_metrics,
+            'post_metrics': post_store_metrics,
+            'comparison_table': store_comparison
+        }
+    
+    def calculate_store_level_metrics(self, financial_df, marketing_df, period_name):
+        """Calculate store-level metrics for a specific period."""
+        print(f"\nCalculating {period_name} store-level metrics...")
+        
+        # Filter only orders from financial data
+        orders_df = financial_df[financial_df['Transaction type'] == 'Order'] if len(financial_df) > 0 else pd.DataFrame()
+        
+        # Handle different column name formats
+        marketing_fees_col = None
+        customer_discounts_col = None
+        
+        if 'Marketing fees | (including any applicable taxes)' in orders_df.columns:
+            marketing_fees_col = 'Marketing fees | (including any applicable taxes)'
+        elif 'Marketing fees (for historical reference only) | (all discounts and fees)' in orders_df.columns:
+            marketing_fees_col = 'Marketing fees (for historical reference only) | (all discounts and fees)'
+        
+        if 'Customer discounts from marketing | (funded by you)' in orders_df.columns:
+            customer_discounts_col = 'Customer discounts from marketing | (funded by you)'
+        elif 'Customer discounts from marketing | (Funded by you)' in orders_df.columns:
+            customer_discounts_col = 'Customer discounts from marketing | (Funded by you)'
+        
+        # Calculate financial metrics by store
+        if len(orders_df) > 0:
+            financial_metrics = orders_df.groupby('Store ID').agg({
+                'Subtotal': 'sum',  # Overall sales
+                'Net total': 'sum'  # Net payout
+            }).round(2)
+            
+            # Add marketing cost calculation
+            if marketing_fees_col and customer_discounts_col:
+                financial_metrics['Marketing_Cost'] = (
+                    orders_df.groupby('Store ID')[marketing_fees_col].sum() + 
+                    orders_df.groupby('Store ID')[customer_discounts_col].sum()
+                ).round(2)
+            else:
+                financial_metrics['Marketing_Cost'] = 0
+        else:
+            financial_metrics = pd.DataFrame()
+        
+        # Calculate marketing driven sales by store
+        if len(marketing_df) > 0:
+            marketing_metrics = marketing_df.groupby('Store ID')['Sales'].sum().round(2)
+        else:
+            marketing_metrics = pd.Series(dtype=float)
+        
+        # Combine metrics
+        store_metrics = pd.DataFrame()
+        
+        if len(financial_metrics) > 0:
+            store_metrics['Overall_Sales'] = financial_metrics['Subtotal']
+            store_metrics['Net_Payout'] = financial_metrics['Net total']
+            store_metrics['Marketing_Cost'] = financial_metrics['Marketing_Cost']
+        
+        if len(marketing_metrics) > 0:
+            store_metrics['Marketing_Driven_Sales'] = marketing_metrics
+        else:
+            store_metrics['Marketing_Driven_Sales'] = 0
+        
+        # Calculate organic sales (Overall - Marketing Driven)
+        if len(store_metrics) > 0:
+            store_metrics['Organic_Sales'] = store_metrics['Overall_Sales'] - store_metrics['Marketing_Driven_Sales']
+        
+        # Fill NaN values with 0
+        store_metrics = store_metrics.fillna(0)
+        
+        print(f"  {period_name}: {len(store_metrics)} stores analyzed")
+        print(f"  Total Overall Sales: ${store_metrics['Overall_Sales'].sum():,.2f}")
+        print(f"  Total Marketing Driven Sales: ${store_metrics['Marketing_Driven_Sales'].sum():,.2f}")
+        print(f"  Total Organic Sales: ${store_metrics['Organic_Sales'].sum():,.2f}")
+        print(f"  Total Marketing Cost: ${store_metrics['Marketing_Cost'].sum():,.2f}")
+        print(f"  Total Net Payout: ${store_metrics['Net_Payout'].sum():,.2f}")
+        
+        return store_metrics
+    
+    def create_store_comparison_table(self, pre_metrics, post_metrics):
+        """Create comprehensive store comparison table with delta calculations."""
+        print("\nCreating store comparison table with delta calculations...")
+        
+        # Get all unique store IDs
+        all_stores = set(pre_metrics.index) | set(post_metrics.index)
+        
+        # Create multi-level column structure
+        metrics = ['Overall_Sales', 'Marketing_Driven_Sales', 'Organic_Sales', 'Marketing_Cost', 'Net_Payout']
+        periods = ['Pre', 'Post', 'Delta', 'Delta_Percent']
+        
+        # Create multi-level columns
+        columns = pd.MultiIndex.from_product([periods, metrics], names=['Period', 'Metric'])
+        
+        # Initialize comparison dataframe
+        comparison_df = pd.DataFrame(index=sorted(all_stores), columns=columns)
+        
+        # Fill in pre and post data
+        for store_id in all_stores:
+            for metric in metrics:
+                # Pre-TODC values
+                pre_val = pre_metrics.loc[store_id, metric] if store_id in pre_metrics.index else 0
+                comparison_df.loc[store_id, ('Pre', metric)] = pre_val
+                
+                # Post-TODC values
+                post_val = post_metrics.loc[store_id, metric] if store_id in post_metrics.index else 0
+                comparison_df.loc[store_id, ('Post', metric)] = post_val
+                
+                # Delta calculation
+                delta = post_val - pre_val
+                comparison_df.loc[store_id, ('Delta', metric)] = delta
+                
+                # Delta percentage calculation
+                delta_percent = (delta / pre_val * 100) if pre_val != 0 else 0
+                comparison_df.loc[store_id, ('Delta_Percent', metric)] = delta_percent
+        
+        # Round to 2 decimal places
+        comparison_df = comparison_df.round(2)
+        
+        print(f"Store comparison table created with {len(comparison_df)} stores and {len(metrics)} metrics")
+        
+        # Print summary statistics
+        print(f"\nStore-Level Summary:")
+        for metric in metrics:
+            pre_total = comparison_df[('Pre', metric)].sum()
+            post_total = comparison_df[('Post', metric)].sum()
+            delta_total = comparison_df[('Delta', metric)].sum()
+            delta_percent_total = (delta_total / pre_total * 100) if pre_total != 0 else 0
+            
+            print(f"  {metric}:")
+            print(f"    Pre-TODC: ${pre_total:,.2f}")
+            print(f"    Post-TODC: ${post_total:,.2f}")
+            print(f"    Delta: ${delta_total:+,.2f} ({delta_percent_total:+.2f}%)")
+        
+        return comparison_df
+    
     def create_visualizations(self, financial_analysis, marketing_analysis, store_analysis, yoy_analysis):
         """Create various visualizations for the analysis."""
         print("\n" + "="*60)
@@ -422,6 +944,10 @@ class TODCAnalyzer:
         
         # Create financial metrics comparison charts
         self.create_financial_comparison_charts(financial_analysis)
+        
+        # Create week-wise metrics chart
+        weekly_data = self.analyze_weekly_metrics()
+        self.create_weekly_metrics_chart(weekly_data)
         
         print("All visualizations saved to 'charts' directory")
     
@@ -713,6 +1239,116 @@ class TODCAnalyzer:
         plt.close()
         print("Financial comparison charts saved: charts/financial_metrics_comparison.png")
     
+    def create_weekly_metrics_chart(self, weekly_data):
+        """Create week-wise metrics chart showing sales, net payout, marketing spend, and customer discounts."""
+        if not weekly_data:
+            print("No weekly data available for visualization")
+            return
+        
+        # Convert to DataFrame for easier plotting
+        df = pd.DataFrame(weekly_data)
+        
+        # Create the chart
+        plt.figure(figsize=(20, 12))
+        
+        # Sales chart
+        plt.subplot(2, 2, 1)
+        bars1 = plt.bar(df['week'], df['sales'], color='skyblue', alpha=0.8, edgecolor='black')
+        plt.title('Weekly Sales', fontsize=14, fontweight='bold')
+        plt.ylabel('Sales ($)')
+        plt.xticks(rotation=45)
+        plt.grid(True, alpha=0.3)
+        
+        # Add value labels on bars
+        for bar, val in zip(bars1, df['sales']):
+            height = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                    f'${val:,.0f}', ha='center', va='bottom', fontweight='bold', fontsize=8)
+        
+        # Net Payout chart
+        plt.subplot(2, 2, 2)
+        bars2 = plt.bar(df['week'], df['net_payout'], color='lightgreen', alpha=0.8, edgecolor='black')
+        plt.title('Weekly Net Payout', fontsize=14, fontweight='bold')
+        plt.ylabel('Net Payout ($)')
+        plt.xticks(rotation=45)
+        plt.grid(True, alpha=0.3)
+        
+        # Add value labels on bars
+        for bar, val in zip(bars2, df['net_payout']):
+            height = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                    f'${val:,.0f}', ha='center', va='bottom', fontweight='bold', fontsize=8)
+        
+        # Marketing Spend chart
+        plt.subplot(2, 2, 3)
+        bars3 = plt.bar(df['week'], df['marketing_spend'], color='orange', alpha=0.8, edgecolor='black')
+        plt.title('Weekly Marketing Spend', fontsize=14, fontweight='bold')
+        plt.ylabel('Marketing Spend ($)')
+        plt.xticks(rotation=45)
+        plt.grid(True, alpha=0.3)
+        
+        # Add value labels on bars
+        for bar, val in zip(bars3, df['marketing_spend']):
+            height = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                    f'${val:,.0f}', ha='center', va='bottom', fontweight='bold', fontsize=8)
+        
+        # Customer Discounts chart
+        plt.subplot(2, 2, 4)
+        bars4 = plt.bar(df['week'], df['customer_discounts'], color='lightcoral', alpha=0.8, edgecolor='black')
+        plt.title('Weekly Customer Discounts (Funded by You)', fontsize=14, fontweight='bold')
+        plt.ylabel('Customer Discounts ($)')
+        plt.xticks(rotation=45)
+        plt.grid(True, alpha=0.3)
+        
+        # Add value labels on bars
+        for bar, val in zip(bars4, df['customer_discounts']):
+            height = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                    f'${val:,.0f}', ha='center', va='bottom', fontweight='bold', fontsize=8)
+        
+        plt.tight_layout()
+        plt.savefig('charts/weekly_metrics_comparison.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        print("Weekly metrics chart saved: charts/weekly_metrics_comparison.png")
+        
+        # Create a combined line chart showing only sales and net payout (weeks 1-17)
+        plt.figure(figsize=(20, 10))
+        
+        # Filter to weeks 1-17 only
+        df_filtered = df[df['week'].isin([f'Week {i}' for i in range(1, 18)])].copy()
+        
+        # Plot sales and net payout without normalization
+        plt.plot(df_filtered['week'], df_filtered['sales'], marker='o', linewidth=3, markersize=8, 
+                label='Sales', color='blue')
+        plt.plot(df_filtered['week'], df_filtered['net_payout'], marker='s', linewidth=3, markersize=8, 
+                label='Net Payout', color='green')
+        
+        plt.title('Weekly Sales and Net Payout Trends (Weeks 1-17)', fontsize=16, fontweight='bold')
+        plt.xlabel('Week', fontsize=12, fontweight='bold')
+        plt.ylabel('Amount ($)', fontsize=12, fontweight='bold')
+        plt.legend(fontsize=11)
+        plt.grid(True, alpha=0.3)
+        plt.xticks(rotation=45)
+        
+        # Add value labels on the lines for key weeks
+        for i, (week, row) in enumerate(df_filtered.iterrows()):
+            if i % 3 == 0:  # Show every third week to avoid clutter
+                plt.annotate(f'Sales: ${row["sales"]:,.0f}\nNet Payout: ${row["net_payout"]:,.0f}',
+                            xy=(i, row["sales"]), xytext=(10, 10), textcoords='offset points',
+                            bbox=dict(boxstyle='round,pad=0.3', facecolor='lightblue', alpha=0.7),
+                            fontsize=9, ha='left')
+        
+        # Add a vertical line to show TODC implementation (Week 9)
+        plt.axvline(x=8, color='red', linestyle='--', alpha=0.7, linewidth=2)
+        plt.text(8.2, max(df_filtered['sales'].max(), df_filtered['net_payout'].max()) * 0.9, 
+                'TODC Implementation\n(Week 9)', fontsize=10, color='red', fontweight='bold')
+        
+        plt.tight_layout()
+        plt.savefig('charts/weekly_metrics_trends.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        print("Weekly metrics trends chart saved: charts/weekly_metrics_trends.png")
+    
     def year_over_year_analysis(self):
         """Perform year-over-year analysis comparing 2024 vs 2025 for both pre and post TODC periods."""
         print("\n" + "="*60)
@@ -927,7 +1563,7 @@ class TODCAnalyzer:
             'recommendations': recommendations
         }
     
-    def export_to_excel(self, financial_analysis, marketing_analysis, store_analysis, yoy_analysis, insights):
+    def export_to_excel(self, financial_analysis, marketing_analysis, store_analysis, yoy_analysis, insights, comprehensive_analysis=None, weekly_data=None, self_serve_analysis=None, store_level_analysis=None):
         """Export all analysis results to an Excel file with multiple sheets."""
         print("\n" + "="*60)
         print("EXPORTING RESULTS TO EXCEL")
@@ -1090,6 +1726,114 @@ class TODCAnalyzer:
                 }])
                 roi_df.to_excel(writer, sheet_name='Marketing_ROI_Analysis', index=False)
             
+            # Comprehensive Pre vs Post Analysis Sheet
+            if comprehensive_analysis and 'pre_todc' in comprehensive_analysis and 'post_todc' in comprehensive_analysis:
+                pre_comp_metrics = comprehensive_analysis['pre_todc']
+                post_comp_metrics = comprehensive_analysis['post_todc']
+                comp_growth_metrics = comprehensive_analysis.get('growth', {})
+                
+                # Create comprehensive comparison DataFrame
+                comprehensive_comparison = []
+                for key in pre_comp_metrics:
+                    if key == 'period':
+                        continue
+                    if isinstance(pre_comp_metrics[key], (int, float)):
+                        pre_val = pre_comp_metrics[key]
+                        post_val = post_comp_metrics[key]
+                        delta = post_val - pre_val
+                        delta_percent = (delta / pre_val * 100) if pre_val != 0 else 0
+                        
+                        comprehensive_comparison.append({
+                            'Metric': key.replace('_', ' ').title(),
+                            'Pre_TODC': pre_val,
+                            'Post_TODC': post_val,
+                            'Delta': delta,
+                            'Delta_Percent': delta_percent
+                        })
+                
+                comprehensive_df = pd.DataFrame(comprehensive_comparison)
+                comprehensive_df.to_excel(writer, sheet_name='Comprehensive_Pre_Post_Analysis', index=False)
+            
+            # Weekly Analysis Sheet
+            if weekly_data:
+                weekly_df = pd.DataFrame(weekly_data)
+                weekly_df.to_excel(writer, sheet_name='Weekly_Analysis', index=False)
+            
+            # Self-Serve Campaigns Budget vs Sales Analysis Sheet
+            if self_serve_analysis:
+                # Summary comparison sheet
+                summary_data = []
+                for year in [2024, 2025]:
+                    summary_key = f'summary_{year}'
+                    if summary_key in self_serve_analysis:
+                        summary_data.append({
+                            'Year': year,
+                            'Total_Campaigns': self_serve_analysis[summary_key]['total_campaigns'],
+                            'Total_Orders': self_serve_analysis[summary_key]['total_orders'],
+                            'Total_Sales': self_serve_analysis[summary_key]['total_sales'],
+                            'Total_Budget': self_serve_analysis[summary_key]['total_budget'],
+                            'Avg_ROAS': self_serve_analysis[summary_key]['avg_roas'],
+                            'Unique_Campaigns': self_serve_analysis[summary_key]['unique_campaigns']
+                        })
+                
+                summary_df = pd.DataFrame(summary_data)
+                summary_df.to_excel(writer, sheet_name='Self_Serve_Summary', index=False)
+                
+                # Detailed campaigns analysis (2025)
+                if 'detailed_campaigns_2025' in self_serve_analysis and len(self_serve_analysis['detailed_campaigns_2025']) > 0:
+                    detailed_df = self_serve_analysis['detailed_campaigns_2025'].reset_index()
+                    detailed_df.to_excel(writer, sheet_name='Self_Serve_Campaigns_2025', index=False)
+                
+                # Year-over-year growth analysis
+                if 'yoy_growth' in self_serve_analysis:
+                    yoy_data = []
+                    for key, value in self_serve_analysis['yoy_growth'].items():
+                        if 'delta_percent' in key:
+                            metric_name = key.replace('_delta_percent', '').replace('_', ' ').title()
+                            delta_value = self_serve_analysis['yoy_growth'][key.replace('_delta_percent', '_delta')]
+                            yoy_data.append({
+                                'Metric': metric_name,
+                                'Delta': delta_value,
+                                'Delta_Percent': value
+                            })
+                    
+                    yoy_df = pd.DataFrame(yoy_data)
+                    yoy_df.to_excel(writer, sheet_name='Self_Serve_YoY_Growth', index=False)
+            
+            # Store-Level Metrics Analysis Sheet
+            if store_level_analysis and 'comparison_table' in store_level_analysis:
+                store_comparison = store_level_analysis['comparison_table']
+                store_comparison.to_excel(writer, sheet_name='Store_Level_Metrics', index=True)
+                
+                # Also create a summary sheet with totals
+                summary_data = []
+                metrics = ['Overall_Sales', 'Marketing_Driven_Sales', 'Organic_Sales', 'Marketing_Cost', 'Net_Payout']
+                periods = ['Pre', 'Post', 'Delta', 'Delta_Percent']
+                
+                for metric in metrics:
+                    for period in periods:
+                        if period in ['Pre', 'Post', 'Delta']:
+                            total = store_comparison[(period, metric)].sum()
+                            summary_data.append({
+                                'Metric': metric,
+                                'Period': period,
+                                'Total': total,
+                                'Unit': '$'
+                            })
+                        else:  # Delta_Percent
+                            pre_total = store_comparison[('Pre', metric)].sum()
+                            delta_total = store_comparison[('Delta', metric)].sum()
+                            total_percent = (delta_total / pre_total * 100) if pre_total != 0 else 0
+                            summary_data.append({
+                                'Metric': metric,
+                                'Period': period,
+                                'Total': total_percent,
+                                'Unit': '%'
+                            })
+                
+                summary_df = pd.DataFrame(summary_data)
+                summary_df.to_excel(writer, sheet_name='Store_Level_Summary', index=False)
+            
             # Insights and Recommendations Sheet
             insights_df = pd.DataFrame({
                 'Insights': insights['insights'],
@@ -1114,6 +1858,18 @@ class TODCAnalyzer:
         store_analysis = self.analyze_store_performance()
         yoy_analysis = self.year_over_year_analysis()
         
+        # Run comprehensive pre vs post analysis
+        comprehensive_analysis = self.analyze_comprehensive_pre_post_metrics()
+        
+        # Run weekly analysis
+        weekly_data = self.analyze_weekly_metrics()
+        
+        # Run self-serve campaigns analysis
+        self_serve_analysis = self.analyze_self_serve_campaigns_budget_vs_sales()
+        
+        # Run store-level metrics analysis
+        store_level_analysis = self.analyze_store_level_metrics()
+        
         # Generate insights
         insights = self.generate_insights_and_recommendations(
             financial_analysis, marketing_analysis, store_analysis, yoy_analysis
@@ -1123,7 +1879,7 @@ class TODCAnalyzer:
         self.create_visualizations(financial_analysis, marketing_analysis, store_analysis, yoy_analysis)
         
         # Export to Excel
-        excel_file = self.export_to_excel(financial_analysis, marketing_analysis, store_analysis, yoy_analysis, insights)
+        excel_file = self.export_to_excel(financial_analysis, marketing_analysis, store_analysis, yoy_analysis, insights, comprehensive_analysis, weekly_data, self_serve_analysis, store_level_analysis)
         
         print("\n" + "="*60)
         print("ANALYSIS COMPLETE!")
@@ -1135,6 +1891,10 @@ class TODCAnalyzer:
             'marketing': marketing_analysis,
             'store': store_analysis,
             'yoy': yoy_analysis,
+            'comprehensive': comprehensive_analysis,
+            'weekly': weekly_data,
+            'self_serve': self_serve_analysis,
+            'store_level': store_level_analysis,
             'insights': insights,
             'excel_file': excel_file
         }
